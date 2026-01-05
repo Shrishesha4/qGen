@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  backend:
+    image: shrishesha4/qgen:latest
+    container_name: qgen-backend
+    restart: unless-stopped
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/question_bank.db}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - SECRET_KEY=${SECRET_KEY}
+    volumes:
+      - qgen-data:/app/data
+    networks:
+      - qgen-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  nginx:
+    image: nginx:alpine
+    container_name: qgen-nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend-dist:/usr/share/nginx/html:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+    networks:
+      - qgen-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  qgen-network:
+    driver: bridge
+
+volumes:
+  qgen-data:
+    driver: local

@@ -1,0 +1,27 @@
+# requirements.txt (generated)
+# Run: python -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+
+pandas
+PyMuPDF
+sentence-transformers
+transformers
+torch
+fastapi
+pydantic
+uvicorn
+google-genai
+google-cloud-aiplatform
+google-api-core
+PyPDF2
+Markdown
+python-dotenv
+sqlalchemy
+passlib[argon2]
+python-jose[cryptography]
+python-multipart
+fpdf
+psycopg2-binary
+
+# Notes:
+# - Local modules (e.g., `gemini`, `pdfutil`) are not included here.
+# - Some packages (sentence-transformers, transformers, PyMuPDF) may need specific versions depending on your environment (GPU vs CPU).

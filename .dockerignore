@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyz
+*.pyw
+*.pyi
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+myenv/
+
+# Node
+node_modules/
+app/node_modules/
+app/dist/
+app/dist-ssr/
+
+# Database
+*.db
+question_bank.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+debug/
+input/
+output/
+images/
+/gemini/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Logs
+*.log
+logs/

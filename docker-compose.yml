@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DATABASE_URL=sqlite:///./data/question_bank.db
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+    volumes:
+      # Persist database
+      - ./data:/app/data
+      # Mount backend for development (optional - comment out for production)
+      - ./backend:/app/backend
+    restart: unless-stopped
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Production-ready service (alternative to above)
+  app-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DATABASE_URL=sqlite:///./data/question_bank.db
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    profiles:
+      - production

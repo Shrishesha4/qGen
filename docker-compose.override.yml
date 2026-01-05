@@ -1,0 +1,20 @@
+# Docker Compose Override for Local Development
+# This file extends docker-compose.yml for development purposes
+# Use: docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app/backend
+      - ./data:/app/data
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DATABASE_URL=sqlite:///./data/question_bank.db
+      - CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
