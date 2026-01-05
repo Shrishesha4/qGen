@@ -125,6 +125,23 @@ class QuestionSetWithOwner(QuestionSet):
     owner_id: int
     owner_email: str
 
+class GenerationHistory(BaseModel):
+    session_id: Optional[int] = None
+    topic: str
+    difficulty: str
+    question_type: str
+    created_at: datetime
+    total_questions: int
+    num_sets: int
+    question_sets: List[QuestionSet] = []
+    
+    class Config:
+        from_attributes = True
+
+class GenerationHistoryWithOwner(GenerationHistory):
+    owner_id: int
+    owner_email: str
+
 # Dashboard Stats
 class AdminDashboardStats(BaseModel):
     total_users: int

@@ -34,15 +34,17 @@ class QuestionGenerator:
         difficulty: str = "medium",
         question_type: str = "multiple_choice",
         user_context: Optional[str] = None,
-        use_cache: bool = True
+        use_cache: bool = True,
+        use_web_search: bool = False
     ) -> List[dict]:
         """
         Generates questions based on a topic or provided content.
         Chunks requests if num_questions > 25.
         Uses local ML for caching, deduplication, and content optimization.
+        Supports grounding with Google Search when use_web_search=True.
         """
         # Try to get cached questions first (reduces API calls)
-        if use_cache and is_local_ml_available():
+        if use_cache and is_local_ml_available() and not use_web_search:
             cached = get_cached_questions(topic, content or "", difficulty, question_type)
             if cached and len(cached) >= num_questions:
                 logger.info(f"Returning {num_questions} questions from cache")
@@ -65,10 +67,14 @@ class QuestionGenerator:
             logger.info(f"Generating chunk of {current_batch_size} questions (Remaining: {remaining})")
             
             batch_questions = self._generate_single_batch(
-                topic, optimized_content, current_batch_size, difficulty, question_type, user_context
+                topic, optimized_content, current_batch_size, difficulty, question_type, user_context, use_web_search
             )
             
             if batch_questions:
+                # Truncate to exact requested size if LLM returned more
+                if len(batch_questions) > current_batch_size:
+                    logger.warning(f"LLM returned {len(batch_questions)} questions, truncating to {current_batch_size}")
+                    batch_questions = batch_questions[:current_batch_size]
                 all_questions.extend(batch_questions)
             
             remaining -= current_batch_size
@@ -93,15 +99,18 @@ class QuestionGenerator:
         num_questions: int,
         difficulty: str,
         question_type: str,
-        user_context: Optional[str]
+        user_context: Optional[str],
+        use_web_search: bool = False
     ) -> List[dict]:
-        logger.info(f"Generating {num_questions} {difficulty} {question_type} questions for topic: '{topic}'")
+        logger.info(f"Generating {num_questions} {difficulty} {question_type} questions for topic: '{topic}'" + 
+                   (" (with web search)" if use_web_search else ""))
 
         context_instruction = ""
         if content:
             context_instruction = f"Base your questions STRICTLY on the following content:\n---\n{content}\n---\n"
         else:
-            context_instruction = f"Generate questions based on general knowledge of the topic: '{topic}'."
+            search_hint = " You can use current web information." if use_web_search else ""
+            context_instruction = f"Generate questions based on general knowledge of the topic: '{topic}'.{search_hint}"
 
         user_instruction = ""
         if user_context:
@@ -113,19 +122,21 @@ class QuestionGenerator:
 
         Parameters:
         - Topic: {topic}
-        - Quantity: {num_questions}
+        - Quantity: EXACTLY {num_questions} questions (NO MORE, NO LESS)
         - Difficulty: {difficulty}
         - Type: {question_type}
 
         Instructions:
         {context_instruction}
         {user_instruction}
-        1. Ensure questions are accurate, relevant, and grammatically correct.
-        2. Provide clear and distinct options for multiple choice questions.
-        3. The 'answer' field must be the exact string text of the correct option.
-        4. Provide a helpful 'explanation' for why the answer is correct.
-        5. Output MUST be a valid JSON array matching the specified schema.
-        6. Create UNIQUE questions. Do not repeat questions if called multiple times in a sequence.
+        1. Generate EXACTLY {num_questions} questions. This is critical.
+        2. Ensure questions are accurate, relevant, and grammatically correct.
+        3. Provide clear and distinct options for multiple choice questions.
+        4. The 'answer' field must be the exact string text of the correct option.
+        5. Provide a helpful 'explanation' for why the answer is correct.
+        6. Output MUST be a valid JSON array matching the specified schema.
+        7. Create UNIQUE questions. Do not repeat questions if called multiple times in a sequence.
+        8. IMPORTANT: Return EXACTLY {num_questions} questions in the array.
         """
 
         try:
@@ -133,7 +144,8 @@ class QuestionGenerator:
             
             response = llm.model.generate_content(
                 prompt,
-                generation_config=generation_config
+                generation_config=generation_config,
+                use_web_search=use_web_search
             )
             
             if not response.text:
@@ -143,6 +155,13 @@ class QuestionGenerator:
             questions_data = json.loads(response.text)
             
             if isinstance(questions_data, list):
+                # Ensure we have exactly the requested number
+                if len(questions_data) > num_questions:
+                    logger.warning(f"LLM returned {len(questions_data)} questions, truncating to {num_questions}")
+                    questions_data = questions_data[:num_questions]
+                elif len(questions_data) < num_questions:
+                    logger.warning(f"LLM returned only {len(questions_data)} questions instead of {num_questions}")
+                
                 logger.info(f"Successfully generated {len(questions_data)} questions.")
                 return questions_data
             else:
@@ -166,6 +185,7 @@ class QuestionGenerator:
         difficulty: str = "medium",
         question_type: str = "multiple_choice",
         user_context: Optional[str] = None,
+        use_web_search: bool = False,
         db: Session = None,
         user: User = None,
         session: GenerationSession = None
@@ -175,6 +195,7 @@ class QuestionGenerator:
         Yields JSON strings formatted as Server-Sent Events (SSE).
         Saves results to DB if db and user are provided.
         Updates session progress if session is provided.
+        Supports grounding with Google Search when use_web_search=True.
         """
         yield f"data: {json.dumps({'type': 'start', 'total_sets': num_sets})}\n\n"
 
@@ -196,7 +217,8 @@ class QuestionGenerator:
             if content:
                 context_instruction = f"Base your questions STRICTLY on the following content:\n---\n{content}\n---\n"
             else:
-                context_instruction = f"Generate questions based on general knowledge of the topic: '{topic}'."
+                search_hint = " You can use current web information." if use_web_search else ""
+                context_instruction = f"Generate questions based on general knowledge of the topic: '{topic}'.{search_hint}"
 
             user_instruction = ""
             if user_context:
@@ -208,19 +230,21 @@ class QuestionGenerator:
 
             Parameters:
             - Topic: {topic}
-            - Quantity: {num_questions}
+            - Quantity: EXACTLY {num_questions} questions (NO MORE, NO LESS)
             - Difficulty: {difficulty}
             - Type: {question_type}
 
             Instructions:
             {context_instruction}
             {user_instruction}
-            1. Ensure questions are accurate, relevant, and grammatically correct.
-            2. Provide clear and distinct options for multiple choice questions.
-            3. The 'answer' field must be the exact string text of the correct option.
-            4. Provide a helpful 'explanation' for why the answer is correct.
-            5. Output MUST be a valid JSON array matching the specified schema.
-            6. Create UNIQUE questions. Do not repeat questions if called multiple times in a sequence.
+            1. Generate EXACTLY {num_questions} questions. This is critical.
+            2. Ensure questions are accurate, relevant, and grammatically correct.
+            3. Provide clear and distinct options for multiple choice questions.
+            4. The 'answer' field must be the exact string text of the correct option.
+            5. Provide a helpful 'explanation' for why the answer is correct.
+            6. Output MUST be a valid JSON array matching the specified schema.
+            7. Create UNIQUE questions. Do not repeat questions if called multiple times in a sequence.
+            8. IMPORTANT: Return EXACTLY {num_questions} questions in the array.
             """
 
             try:
@@ -230,7 +254,8 @@ class QuestionGenerator:
                 response = llm.model.generate_content(
                     prompt,
                     generation_config=generation_config,
-                    stream=True
+                    stream=True,
+                    use_web_search=use_web_search
                 )
                 
                 full_text = ""
@@ -245,6 +270,14 @@ class QuestionGenerator:
                     continue
 
                 questions = json.loads(full_text)
+                
+                # Ensure we have exactly the requested number
+                if isinstance(questions, list):
+                    if len(questions) > num_questions:
+                        logger.warning(f"Set {current_set}: LLM returned {len(questions)} questions, truncating to {num_questions}")
+                        questions = questions[:num_questions]
+                    elif len(questions) < num_questions:
+                        logger.warning(f"Set {current_set}: LLM returned only {len(questions)} questions instead of {num_questions}")
                 
             except Exception as e:
                 logger.error(f"Error generating questions: {e}")

@@ -7,29 +7,29 @@
   import { Button } from "$lib/components/ui/button";
   import { Card, CardHeader, CardTitle, CardContent } from "$lib/components/ui/card";
 
-  let token;
+  let token = $state();
   authState.subscribe(v => token = v.token);
 
-  let historyGroups = [];
-  let loading = true;
-  let currentView = "groups"; // "groups", "sets", "questions", "question_detail"
-  let selectedGroup = null;
-  let selectedSet = null;
-  let selectedQuestion = null;
+  let historyGroups = $state([]);
+  let loading = $state(true);
+  let currentView = $state("groups"); // "groups", "sets", "questions", "question_detail"
+  let selectedGroup = $state(null);
+  let selectedSet = $state(null);
+  let selectedQuestion = $state(null);
   
   // Export state
-  let expandedExports = {
+  let expandedExports = $state({
     all: false,
     questionsOnly: false
-  };
+  });
   
   // Regeneration loading state
-  let regeneratingQuestionId = null;
-  let regeneratingSetId = null;
+  let regeneratingQuestionId = $state(null);
+  let regeneratingSetId = $state(null);
 
   // Validation modal state
-  let showValidationModal = false;
-  let validationText = "";
+  let showValidationModal = $state(false);
+  let validationText = $state("");
 
   // Format validation text for display
   function formatValidationText(text) {
@@ -70,36 +70,22 @@
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (res.ok) {
-        const sets = await res.json();
-        historyGroups = groupSets(sets);
+        const groups = await res.json();
+        // Backend now returns already grouped data
+        historyGroups = groups.map(group => ({
+          id: group.session_id || `legacy_${group.question_sets[0].id}`,
+          topic: group.topic,
+          date: new Date(group.created_at),
+          sets: group.question_sets,
+          total_questions: group.total_questions,
+          num_sets: group.num_sets
+        }));
       }
     } catch (e) {
       console.error(e);
     } finally {
       loading = false;
     }
-  }
-
-  function groupSets(sets) {
-    const groups = {};
-    
-    sets.forEach(set => {
-      const date = new Date(set.created_at);
-      const timeKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()} ${date.getHours()}:${date.getMinutes()}`;
-      const key = `${set.topic}::${timeKey}`;
-      
-      if (!groups[key]) {
-        groups[key] = {
-          id: key,
-          topic: set.topic,
-          date: date,
-          sets: []
-        };
-      }
-      groups[key].sets.push(set);
-    });
-
-    return Object.values(groups).sort((a, b) => b.date - a.date);
   }
 
   function selectGroup(group) {

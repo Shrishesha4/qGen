@@ -249,6 +249,7 @@ async def generate_questions_endpoint(
     difficulty: str = Form("medium"),
     question_type: str = Form("multiple_choice"),
     user_context: Optional[str] = Form(None),
+    use_web_search: bool = Form(False),
     task_id: Optional[int] = Form(None),
     file: Optional[UploadFile] = File(None),
     current_user: models.User = Depends(auth.get_current_user),
@@ -312,6 +313,7 @@ async def generate_questions_endpoint(
                     difficulty=difficulty,
                     question_type=question_type,
                     user_context=user_context,
+                    use_web_search=use_web_search,
                     db=db,
                     user=current_user,
                     session=session
@@ -364,9 +366,45 @@ async def generate_questions_endpoint(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/history", response_model=List[schemas.QuestionSet])
+@app.get("/history")
 def get_history(current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
-    return db.query(models.QuestionSet).filter(models.QuestionSet.owner_id == current_user.id).order_by(models.QuestionSet.created_at.desc()).all()
+    """
+    Get generation history grouped by session.
+    Returns list of generations where each generation contains all question sets from that session.
+    """
+    from sqlalchemy import func
+    
+    # Get all question sets for the user with questions eagerly loaded
+    all_sets = db.query(models.QuestionSet).filter(
+        models.QuestionSet.owner_id == current_user.id
+    ).order_by(models.QuestionSet.created_at.desc()).all()
+    
+    # Group by session_id
+    grouped = {}
+    for q_set in all_sets:
+        session_key = q_set.session_id if q_set.session_id else f"legacy_{q_set.id}"
+        
+        if session_key not in grouped:
+            grouped[session_key] = {
+                "session_id": q_set.session_id,
+                "topic": q_set.topic,
+                "difficulty": q_set.difficulty,
+                "question_type": q_set.question_type,
+                "created_at": q_set.created_at,
+                "total_questions": 0,
+                "num_sets": 0,
+                "question_sets": []
+            }
+        
+        # Convert to dict using schema to ensure questions are included
+        set_dict = schemas.QuestionSet.from_orm(q_set).dict()
+        grouped[session_key]["question_sets"].append(set_dict)
+        grouped[session_key]["total_questions"] += q_set.question_count
+        grouped[session_key]["num_sets"] += 1
+    
+    # Convert to list and sort by created_at
+    result = sorted(grouped.values(), key=lambda x: x["created_at"], reverse=True)
+    return result
 
 @app.get("/history/{set_id}", response_model=schemas.QuestionSet)
 def get_question_set(set_id: int, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
@@ -374,6 +412,28 @@ def get_question_set(set_id: int, current_user: models.User = Depends(auth.get_c
     if not q_set:
         raise HTTPException(status_code=404, detail="Question set not found")
     return q_set
+
+@app.get("/history/session/{session_id}")
+def get_generation_session(session_id: int, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """Get all question sets from a generation session"""
+    sets = db.query(models.QuestionSet).filter(
+        models.QuestionSet.session_id == session_id,
+        models.QuestionSet.owner_id == current_user.id
+    ).all()
+    
+    if not sets:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    
+    return {
+        "session_id": session_id,
+        "topic": sets[0].topic,
+        "difficulty": sets[0].difficulty,
+        "question_type": sets[0].question_type if hasattr(sets[0], 'question_type') else 'multiple_choice',
+        "created_at": sets[0].created_at,
+        "total_questions": sum(s.question_count for s in sets),
+        "num_sets": len(sets),
+        "question_sets": sets
+    }
 
 @app.delete("/history/{set_id}")
 def delete_question_set(set_id: int, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
@@ -602,33 +662,57 @@ def get_all_recent_generations(
         ))
     return result
 
-@app.get("/admin/history", response_model=List[schemas.QuestionSetWithOwner])
+@app.get("/admin/history")
 def get_all_history(
     current_user: models.User = Depends(auth.get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """Get all question sets from all users for admin"""
-    sets = db.query(models.QuestionSet).order_by(
+    """
+    Get all generation history grouped by session (admin only).
+    """
+    # Get all question sets with owner info
+    all_sets = db.query(models.QuestionSet).order_by(
         models.QuestionSet.created_at.desc()
     ).all()
     
-    result = []
-    for s in sets:
-        owner = db.query(models.User).filter(models.User.id == s.owner_id).first()
-        result.append(schemas.QuestionSetWithOwner(
-            id=s.id,
-            topic=s.topic,
-            difficulty=s.difficulty,
-            created_at=s.created_at,
-            updated_at=s.updated_at,
-            validation_text=s.validation_text,
-            question_count=s.question_count,
-            is_archived=s.is_archived,
-            session_id=s.session_id,
-            questions=[],
-            owner_id=s.owner_id,
-            owner_email=owner.email if owner else "Unknown"
-        ))
+    # Group by session_id
+    grouped = {}
+    for q_set in all_sets:
+        owner = db.query(models.User).filter(models.User.id == q_set.owner_id).first()
+        session_key = q_set.session_id if q_set.session_id else f"legacy_{q_set.id}"
+        
+        if session_key not in grouped:
+            grouped[session_key] = {
+                "session_id": q_set.session_id,
+                "topic": q_set.topic,
+                "difficulty": q_set.difficulty,
+                "question_type": q_set.question_type if hasattr(q_set, 'question_type') else 'multiple_choice',
+                "created_at": q_set.created_at,
+                "total_questions": 0,
+                "num_sets": 0,
+                "owner_id": q_set.owner_id,
+                "owner_email": owner.email if owner else "Unknown",
+                "question_sets": []
+            }
+        
+        grouped[session_key]["question_sets"].append({
+            "id": q_set.id,
+            "topic": q_set.topic,
+            "difficulty": q_set.difficulty,
+            "question_type": q_set.question_type if hasattr(q_set, 'question_type') else 'multiple_choice',
+            "created_at": q_set.created_at,
+            "updated_at": q_set.updated_at,
+            "validation_text": q_set.validation_text,
+            "question_count": q_set.question_count,
+            "is_archived": q_set.is_archived,
+            "session_id": q_set.session_id,
+            "questions": []
+        })
+        grouped[session_key]["total_questions"] += q_set.question_count
+        grouped[session_key]["num_sets"] += 1
+    
+    # Convert to list and sort by created_at
+    result = sorted(grouped.values(), key=lambda x: x["created_at"], reverse=True)
     return result
 
 @app.get("/admin/history/{set_id}", response_model=schemas.QuestionSetWithOwner)

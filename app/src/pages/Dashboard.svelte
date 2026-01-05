@@ -21,6 +21,7 @@
   let difficulty = "medium";
   let questionType = "multiple_choice";
   let userContext = "";
+  let useWebSearch = false;
   let files;
   
   let questionSets = [];
@@ -36,6 +37,10 @@
     all: false,
     sets: {}
   };
+  
+  // Collapsible state for sets and questions
+  let collapsedSets = {};
+  let collapsedQuestions = {};
   
   // Regeneration loading state
   let regeneratingQuestionId = null;
@@ -146,6 +151,7 @@
     difficulty = "medium";
     questionType = "multiple_choice";
     userContext = "";
+    useWebSearch = false;
     files = null;
     error = null;
     // Reset file input
@@ -224,6 +230,7 @@
       formData.append('num_sets', String(numSets));
       formData.append('difficulty', difficulty);
       formData.append('question_type', questionType);
+      formData.append('use_web_search', String(useWebSearch));
       if (content) formData.append('content', content);
       if (userContext) formData.append('user_context', userContext);
       if (files && files[0]) formData.append('file', files[0]);
@@ -480,7 +487,7 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
       <!-- Form Sidebar -->
-      <Card class="lg:sticky lg:top-6 lg:h-fit order-2 lg:order-1">
+      <Card class="lg:sticky lg:top-4 lg:self-start order-2 lg:order-1" style="max-height: calc(100vh - 2rem); overflow-y: auto;">
         <CardHeader>
           <CardTitle>Generation Settings</CardTitle>
         </CardHeader>
@@ -580,6 +587,21 @@
                 disabled={loading}
                 rows="2"
               />
+            </div>
+
+            <!-- Web Search Toggle -->
+            <div class="flex items-center space-x-2 p-3 bg-muted/50 rounded-lg border border-border">
+              <input 
+                type="checkbox" 
+                id="webSearch" 
+                bind:checked={useWebSearch}
+                disabled={loading}
+                class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-2"
+              />
+              <Label for="webSearch" class="text-sm font-medium cursor-pointer flex items-center gap-2">
+                <i class="fas fa-globe text-primary"></i>
+                Enable Web Search (Ground with live data)
+              </Label>
             </div>
 
             <!-- Generate Button -->
@@ -909,14 +931,20 @@
 
             {#each questionSets as questions, sIdx}
               <Card>
-                <CardHeader>
+                <CardHeader class="cursor-pointer" onclick={() => collapsedSets[sIdx] = !collapsedSets[sIdx]}>
                   <div class="flex items-center justify-between">
-                    <CardTitle>Set # {sIdx + 1}</CardTitle>
+                    <div class="flex items-center gap-2">
+                      <i class={`fas fa-chevron-right transition-transform ${!collapsedSets[sIdx] ? 'rotate-90' : ''}`}></i>
+                      <CardTitle>Set # {sIdx + 1} <span class="text-sm text-muted-foreground font-normal">({questions.length} questions)</span></CardTitle>
+                    </div>
                     <div class="flex items-center gap-2">
                       <Button 
                         variant="outline" 
                         size="sm" 
-                        onclick={() => toggleExportSetAll(sIdx)}
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          toggleExportSetAll(sIdx);
+                        }}
                         class="flex items-center gap-1"
                       >
                         <i class={`fas fa-chevron-down transition-transform text-xs ${expandedExports.sets[sIdx]?.all ? 'rotate-180' : ''}`}></i>
@@ -925,7 +953,10 @@
                       <Button 
                         variant="outline" 
                         size="sm" 
-                        onclick={() => toggleExportSetQuestionsOnly(sIdx)}
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          toggleExportSetQuestionsOnly(sIdx);
+                        }}
                         class="flex items-center gap-1"
                       >
                         <i class={`fas fa-chevron-down transition-transform text-xs ${expandedExports.sets[sIdx]?.questionsOnly ? 'rotate-180' : ''}`}></i>
@@ -1012,10 +1043,25 @@
                     </div>
                   {/if}
                 </CardHeader>
+                {#if !collapsedSets[sIdx]}
                 <CardContent>
-                  <div class="space-y-4">
-                    {#each questions as q, qIdx}
-                      <div class="border rounded-lg p-4 hover:bg-muted/50 transition-colors relative">
+                  <div class="space-y-4">{#each questions as q, qIdx}
+                      <div 
+                        class="border rounded-lg p-4 hover:bg-muted/50 transition-colors relative cursor-pointer" 
+                        onclick={() => {
+                          const key = `${sIdx}_${qIdx}`;
+                          collapsedQuestions[key] = !collapsedQuestions[key];
+                        }}
+                        role="button"
+                        tabindex="0"
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            const key = `${sIdx}_${qIdx}`;
+                            collapsedQuestions[key] = !collapsedQuestions[key];
+                          }
+                        }}
+                      >
                         {#if regeneratingQuestionId === q.id}
                           <div class="absolute inset-0 bg-background/80 backdrop-blur-sm rounded-lg flex items-center justify-center z-10">
                             <div class="flex flex-col items-center gap-2">
@@ -1025,19 +1071,26 @@
                           </div>
                         {/if}
                         <div class="flex gap-3 items-start mb-3">
-                          <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-sm font-bold flex-shrink-0">
-                            {qIdx + 1}
-                          </span>
+                          <div class="flex items-center gap-2">
+                            <i class={`fas fa-chevron-right transition-transform text-xs ${!collapsedQuestions[`${sIdx}_${qIdx}`] ? 'rotate-90' : ''}`}></i>
+                            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-sm font-bold flex-shrink-0">
+                              {qIdx + 1}
+                            </span>
+                          </div>
                           <p class="font-medium flex-1 text-base leading-relaxed">{q.description}</p>
                           <button 
                             class="p-1.5 rounded hover:bg-muted transition-all text-muted-foreground hover:text-primary flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed" 
-                            onclick={() => regenerateQuestion(q.id, sIdx, qIdx)}
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              regenerateQuestion(q.id, sIdx, qIdx);
+                            }}
                             disabled={regeneratingQuestionId === q.id}
                             title="Regenerate this question"
                           >
                             <i class="fas fa-redo"></i>
                           </button>
                         </div>
+                        {#if !collapsedQuestions[`${sIdx}_${qIdx}`]}
                         <div class="space-y-2 ml-9">
                           {#each q.options as opt, oIdx}
                             <div 
@@ -1063,10 +1116,12 @@
                             <p class="text-sm text-blue-800 dark:text-blue-200">{q.explanation}</p>
                           </div>
                         {/if}
+                        {/if}
                       </div>
                     {/each}
                   </div>
                 </CardContent>
+                {/if}
               </Card>
             {/each}
           </div>

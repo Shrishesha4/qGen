@@ -59,10 +59,12 @@ class ModelWrapper:
         self.client = client
         self.model_name = model_name
 
-    def generate_content(self, prompt, generation_config=None, stream=False):
+    def generate_content(self, prompt, generation_config=None, stream=False, use_web_search=False):
         """
         Wraps the new client.models.generate_content to look like the old model.generate_content
         Supports both streaming and non-streaming responses.
+        Supports grounding with Google Search when use_web_search=True.
+        Note: Web search grounding may not work with streaming in current API version.
         """
         config = {}
         
@@ -76,10 +78,18 @@ class ModelWrapper:
                 config['response_mime_type'] = generation_config.response_mime_type
             if hasattr(generation_config, 'temperature'):
                 config['temperature'] = generation_config.temperature
+        
+        # Add grounding with Google Search if requested
+        # Note: Some API versions may not support tools with streaming
+        tools = None
+        if use_web_search and not stream:
+            # Only use tools with non-streaming for compatibility
+            tools = [types.Tool(google_search=types.GoogleSearch())]
 
         try:
             if stream:
                 # Use generate_content_stream for streaming responses
+                # Don't pass tools to streaming - not supported in current API
                 response = self.client.models.generate_content_stream(
                     model=self.model_name,
                     contents=prompt,
@@ -90,7 +100,8 @@ class ModelWrapper:
                 response = self.client.models.generate_content(
                     model=self.model_name,
                     contents=prompt,
-                    config=config
+                    config=config,
+                    tools=tools
                 )
             return response
         except Exception as e:
