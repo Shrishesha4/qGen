@@ -3,9 +3,9 @@
 
 pandas
 PyMuPDF
+# Local ML for embeddings, caching, and deduplication (much smaller than torch+transformers)
 sentence-transformers
-transformers
-torch
+numpy
 fastapi
 pydantic
 uvicorn

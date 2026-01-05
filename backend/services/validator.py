@@ -1,7 +1,12 @@
 import json
 import logging
 import backend.core.llm as llm
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
+from backend.core.local_ml import (
+    batch_validate_locally,
+    remove_duplicate_questions,
+    is_local_ml_available
+)
 
 logger = logging.getLogger(__name__)
 
@@ -9,16 +14,45 @@ class QuestionValidator:
     def __init__(self):
         pass
 
-    def validate_question_batch_stream(self, questions: List[Dict[str, Any]], topic: str, content: str = ""):
+    def validate_question_batch_stream(self, questions: List[Dict[str, Any]], topic: str, content: str = "", skip_api: bool = False):
         """
         Validates a batch of questions with streaming support.
         Yields validation thinking chunks, then returns the final validated questions.
+        
+        If skip_api=True, only performs local validation (no Gemini API call).
         """
         if not questions:
             yield None, []
             return
 
         logger.info(f"Validating batch of {len(questions)} questions for topic: {topic}")
+        
+        # Step 1: Local pre-validation (catches obvious issues without API)
+        if is_local_ml_available():
+            yield "🔍 Running local validation checks...\n", None
+            valid_questions, issues = batch_validate_locally(questions)
+            
+            if issues:
+                yield f"⚠️ Found {len(issues)} issues locally:\n" + "\n".join(issues[:5]) + "\n", None
+            
+            # Remove duplicates locally
+            original_count = len(valid_questions)
+            valid_questions = remove_duplicate_questions(valid_questions)
+            if len(valid_questions) < original_count:
+                yield f"🔄 Removed {original_count - len(valid_questions)} duplicate questions\n", None
+            
+            questions = valid_questions
+            
+            if not questions:
+                yield "❌ No valid questions after local validation\n", []
+                return
+            
+            yield f"✅ {len(questions)} questions passed local validation\n", None
+        
+        # Step 2: If skip_api is True, return after local validation
+        if skip_api:
+            yield None, questions
+            return
         
         # First, ask LLM to validate and explain its validation process
         validation_prompt = f"""

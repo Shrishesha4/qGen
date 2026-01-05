@@ -5,6 +5,15 @@ from sqlalchemy.orm import Session
 import backend.core.llm as llm
 from backend.services.validator import QuestionValidator
 from backend.core.models import QuestionSet, Question, User, GenerationSession
+from backend.core.local_ml import (
+    remove_duplicate_questions,
+    get_cached_questions,
+    cache_questions,
+    find_similar_cached_questions,
+    chunk_content,
+    get_most_relevant_chunk,
+    is_local_ml_available
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -24,12 +33,29 @@ class QuestionGenerator:
         num_questions: int = 5,
         difficulty: str = "medium",
         question_type: str = "multiple_choice",
-        user_context: Optional[str] = None
+        user_context: Optional[str] = None,
+        use_cache: bool = True
     ) -> List[dict]:
         """
         Generates questions based on a topic or provided content.
         Chunks requests if num_questions > 25.
+        Uses local ML for caching, deduplication, and content optimization.
         """
+        # Try to get cached questions first (reduces API calls)
+        if use_cache and is_local_ml_available():
+            cached = get_cached_questions(topic, content or "", difficulty, question_type)
+            if cached and len(cached) >= num_questions:
+                logger.info(f"Returning {num_questions} questions from cache")
+                return remove_duplicate_questions(cached[:num_questions])
+        
+        # Optimize content for API call (send only relevant chunks)
+        optimized_content = content
+        if content and is_local_ml_available() and len(content) > 3000:
+            chunks = chunk_content(content, max_chunk_size=2500)
+            if len(chunks) > 1:
+                optimized_content = get_most_relevant_chunk(chunks, topic)
+                logger.info(f"Optimized content from {len(content)} to {len(optimized_content)} chars")
+        
         all_questions = []
         chunk_size = 25
         remaining = num_questions
@@ -39,13 +65,24 @@ class QuestionGenerator:
             logger.info(f"Generating chunk of {current_batch_size} questions (Remaining: {remaining})")
             
             batch_questions = self._generate_single_batch(
-                topic, content, current_batch_size, difficulty, question_type, user_context
+                topic, optimized_content, current_batch_size, difficulty, question_type, user_context
             )
             
             if batch_questions:
                 all_questions.extend(batch_questions)
             
             remaining -= current_batch_size
+        
+        # Remove semantic duplicates using local ML
+        if is_local_ml_available():
+            original_count = len(all_questions)
+            all_questions = remove_duplicate_questions(all_questions)
+            if len(all_questions) < original_count:
+                logger.info(f"Removed {original_count - len(all_questions)} duplicate questions")
+            
+            # Cache for future use
+            if all_questions:
+                cache_questions(all_questions, topic, content or "", difficulty, question_type)
         
         return all_questions
 

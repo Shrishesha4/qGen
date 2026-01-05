@@ -12,8 +12,10 @@ services:
       - DATABASE_URL=sqlite:///./data/question_bank.db
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      # Local ML embedding model (lightweight, ~80MB)
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
     volumes:
-      # Persist database
+      # Persist database and embeddings cache
       - ./data:/app/data
       # Mount backend for development (optional - comment out for production)
       - ./backend:/app/backend
@@ -32,6 +34,7 @@ services:
       - DATABASE_URL=sqlite:///./data/question_bank.db
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
     volumes:
       - ./data:/app/data
     restart: unless-stopped

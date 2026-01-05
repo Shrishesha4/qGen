@@ -202,10 +202,42 @@ def toggle_user_active(user_id: int, current_user: models.User = Depends(auth.ge
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint for monitoring and load balancers"""
+    from backend.core.local_ml import is_local_ml_available
+    
     return {
         "status": "healthy",
         "service": "question-bank-generator",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
+        "features": {
+            "local_ml": is_local_ml_available(),
+            "gemini_api": bool(os.getenv("GEMINI_API_KEY"))
+        }
+    }
+
+
+@app.get("/api/features")
+async def get_features():
+    """Get available features and optimization status"""
+    from backend.core.local_ml import is_local_ml_available
+    
+    return {
+        "local_ml": {
+            "available": is_local_ml_available(),
+            "features": [
+                "Semantic duplicate detection",
+                "Question caching",
+                "Content chunk optimization", 
+                "Local pre-validation"
+            ] if is_local_ml_available() else []
+        },
+        "gemini_api": {
+            "configured": bool(os.getenv("GEMINI_API_KEY")),
+            "features": [
+                "Question generation",
+                "Advanced validation",
+                "Explanation generation"
+            ]
+        }
     }
 
 @app.post("/generate")

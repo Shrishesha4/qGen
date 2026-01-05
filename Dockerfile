@@ -26,16 +26,22 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install minimal system dependencies
 RUN apt-get update && apt-get install -y \
-    gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy backend requirements
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install CPU-only PyTorch first (much smaller than default CUDA version)
+# Then install other dependencies
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip cache purge && \
+    # Clean up unnecessary files to reduce image size
+    find /usr/local/lib/python3.11/site-packages -name "*.pyc" -delete && \
+    find /usr/local/lib/python3.11/site-packages -name "__pycache__" -type d -delete
 
 # Copy backend source
 COPY backend/ ./backend/
@@ -43,8 +49,8 @@ COPY backend/ ./backend/
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Create directory for database
-RUN mkdir -p /app/data
+# Create directory for database and embeddings cache
+RUN mkdir -p /app/data /app/data/embeddings_cache
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && \
