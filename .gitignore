@@ -1,59 +1,66 @@
-# Python
+```
+# Environment variables
+.env
+.env.local
+*.env.*
+
+# Dependencies
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.pyz
-*.pyw
-*.pyi
-*.egg-info/
-dist/
-build/
+.Python
+env/
 venv/
 .venv/
-myenv/
-
-# Database
-*.db
-question_bank.db
-data/
-frontend-dist/
-# Environment
-.env
-.env.local
-.env.*.local
-
-# Project specific
-debug
-input
-output
-images
-.DS_Store
-/gemini/Neet/ncert_books
-
-# Node.js
-node_modules
-# Logs
-logs
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+*.pot
+*.po
+*~
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
 
-node_modules
-dist
-dist-ssr
-*.local
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+```
