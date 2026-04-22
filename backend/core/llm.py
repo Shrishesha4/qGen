@@ -1,7 +1,6 @@
 import os
 import logging
-from google import genai
-from google.genai import types
+from typing import Optional, Dict, Any, Generator, Union
 from dotenv import load_dotenv
 
 # Configure logging
@@ -14,112 +13,232 @@ backend_dir = os.path.dirname(current_dir)
 env_path = os.path.join(backend_dir, ".env")
 load_dotenv(env_path)
 
-API_KEY = os.getenv("GEMINI_API_KEY")
+# Provider configuration
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()  # openai, gemini, anthropic, ollama, lmstudio, etc.
+LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL")  # Optional: custom endpoint for OpenAI-compatible APIs
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")  # Default model name
 
-if not API_KEY:
-    logger.warning("GEMINI_API_KEY environment variable not set. LLM features may fail.")
-
-# Initialize the client
-client = genai.Client(api_key=API_KEY)
-
-# --- Model Configuration ---
-MODEL_NAME = "gemini-flash-latest"
+if not LLM_API_KEY:
+    logger.warning("LLM_API_KEY environment variable not set. LLM features may fail.")
 
 # --- Schemas ---
-# The new SDK allows defining schemas using dictionaries, similar to the old one,
-# but passing them is slightly different in the config.
-
-# Schema for a single question
+# Schema for a single question (OpenAI compatible format)
 question_schema = {
-    "type": "OBJECT",
+    "type": "object",
     "properties": {
-        "description": {"type": "STRING"},
+        "description": {"type": "string"},
         "options": {
-            "type": "ARRAY",
-            "items": {"type": "STRING"}
+            "type": "array",
+            "items": {"type": "string"}
         },
-        "answer": {"type": "STRING"},
-        "explanation": {"type": "STRING"}
+        "answer": {"type": "string"},
+        "explanation": {"type": "string"}
     },
     "required": ["description", "options", "answer"]
 }
 
 # Schema for the list of questions (Top level response)
 questions_schema = {
-    "type": "ARRAY",
+    "type": "array",
     "items": question_schema
 }
 
-# --- Wrapper Class for Compatibility ---
-# The rest of the app expects a 'model' object with a 'generate_content' method.
-# We'll create a wrapper to adapt the new 'client' to the old interface the app uses.
 
-class ModelWrapper:
-    def __init__(self, client, model_name):
-        self.client = client
-        self.model_name = model_name
-
-    def generate_content(self, prompt, generation_config=None, stream=False, use_web_search=False):
+class LLMClient:
+    """
+    Unified LLM client that supports multiple providers via OpenAI-compatible API.
+    Supports: OpenAI, Gemini, Anthropic (via proxy), Ollama, LM Studio, vLLM, etc.
+    """
+    
+    def __init__(self, provider: str = "openai", api_key: Optional[str] = None, 
+                 base_url: Optional[str] = None, model: Optional[str] = None):
+        self.provider = provider
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model = model or "gpt-4o-mini"
+        self._client = None
+        self._init_client()
+    
+    def _init_client(self):
+        """Initialize the appropriate client based on provider."""
+        try:
+            from openai import OpenAI
+            
+            # Configure base URL based on provider
+            if self.base_url:
+                # Custom endpoint provided
+                base_url = self.base_url
+            elif self.provider == "openai":
+                base_url = "https://api.openai.com/v1"
+            elif self.provider == "gemini":
+                # Google AI Studio OpenAI-compatible endpoint
+                base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+            elif self.provider == "ollama":
+                base_url = "http://localhost:11434/v1"
+            elif self.provider == "lmstudio":
+                base_url = "http://localhost:1234/v1"
+            elif self.provider == "anthropic":
+                # Anthropic doesn't have native OpenAI compat, but can use proxies
+                logger.warning("Anthropic requires an OpenAI-compatible proxy. Set LLM_BASE_URL.")
+                base_url = None
+            else:
+                # Assume it's a custom OpenAI-compatible endpoint
+                base_url = None
+            
+            # Initialize OpenAI client
+            kwargs = {"api_key": self.api_key or "not-needed"}
+            if base_url:
+                kwargs["base_url"] = base_url
+            
+            self._client = OpenAI(**kwargs)
+            logger.info(f"Initialized LLM client for provider: {self.provider}, model: {self.model}")
+            
+        except ImportError:
+            logger.error("openai package not installed. Run: pip install openai")
+            raise
+    
+    def generate_content(self, prompt: str, generation_config: Optional[Dict] = None, 
+                        stream: bool = False, use_web_search: bool = False) -> Union[Any, Generator]:
         """
-        Wraps the new client.models.generate_content to look like the old model.generate_content
-        Supports both streaming and non-streaming responses.
-        Supports grounding with Google Search when use_web_search=True.
-        Note: Web search grounding may not work with streaming in current API version.
-        """
-        config = {}
+        Generate content using the configured LLM provider.
         
-        # Adapt the old 'generation_config' object (which was likely a GenerationConfig object)
-        # to the new SDK's 'config' dictionary or types.GenerateContentConfig.
+        Args:
+            prompt: The input prompt/text
+            generation_config: Configuration including response_schema, temperature, etc.
+            stream: Whether to stream the response
+            use_web_search: Whether to enable web search (provider-dependent)
+        
+        Returns:
+            Response object or generator depending on stream parameter
+        """
+        if not self._client:
+            raise RuntimeError("LLM client not initialized")
+        
+        # Build request parameters
+        messages = [{"role": "user", "content": prompt}]
+        
+        config = {}
         if generation_config:
-            # Check if it has a response_schema
-            if hasattr(generation_config, 'response_schema'):
-                config['response_schema'] = generation_config.response_schema
-            if hasattr(generation_config, 'response_mime_type'):
-                config['response_mime_type'] = generation_config.response_mime_type
+            # Map generation_config to OpenAI parameters
             if hasattr(generation_config, 'temperature'):
                 config['temperature'] = generation_config.temperature
+            elif isinstance(generation_config, dict) and 'temperature' in generation_config:
+                config['temperature'] = generation_config['temperature']
+            else:
+                config['temperature'] = 0.7
+            
+            # Handle response schema for JSON mode
+            if hasattr(generation_config, 'response_schema'):
+                config['response_format'] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "questions_response",
+                        "schema": generation_config.response_schema,
+                        "strict": True
+                    }
+                }
+            elif isinstance(generation_config, dict) and 'response_schema' in generation_config:
+                config['response_format'] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "questions_response",
+                        "schema": generation_config['response_schema'],
+                        "strict": True
+                    }
+                }
+            elif hasattr(generation_config, 'response_mime_type'):
+                if generation_config.response_mime_type == "application/json":
+                    config['response_format'] = {"type": "json_object"}
         
-        # Add grounding with Google Search if requested
-        # Note: Some API versions may not support tools with streaming
+        # Web search tools (provider-dependent)
         tools = None
-        if use_web_search and not stream:
-            # Only use tools with non-streaming for compatibility
-            tools = [types.Tool(google_search=types.GoogleSearch())]
-
+        if use_web_search:
+            if self.provider == "openai":
+                tools = [{"type": "web_search_preview"}]
+            elif self.provider == "gemini":
+                # Gemini web search via tools
+                tools = [{"googleSearch": {}}]
+            # Other providers may not support web search
+        
+        if tools:
+            config['tools'] = tools
+        
         try:
             if stream:
-                # Use generate_content_stream for streaming responses
-                # Don't pass tools to streaming - not supported in current API
-                response = self.client.models.generate_content_stream(
-                    model=self.model_name,
-                    contents=prompt,
-                    config=config
+                # Streaming response
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    stream=True,
+                    **config
                 )
+                return response
             else:
-                # Use regular generate_content for non-streaming
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt,
-                    config=config,
-                    tools=tools
+                # Non-streaming response
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    **config
                 )
-            return response
+                return response
         except Exception as e:
             logger.error(f"Error in generate_content: {e}")
             raise e
 
+
+class ModelWrapper:
+    """
+    Wrapper to maintain backward compatibility with existing code.
+    Adapts the new LLMClient to the old interface.
+    """
+    def __init__(self, client: LLMClient, model_name: str):
+        self.client = client
+        self.model_name = model_name
+
+    def generate_content(self, prompt: str, generation_config: Optional[Dict] = None, 
+                        stream: bool = False, use_web_search: bool = False):
+        """
+        Wraps LLMClient.generate_content to maintain old interface.
+        Supports both streaming and non-streaming responses.
+        Supports grounding with Google Search when use_web_search=True.
+        """
+        return self.client.generate_content(
+            prompt=prompt,
+            generation_config=generation_config,
+            stream=stream,
+            use_web_search=use_web_search
+        )
+
+
 # Create the global model instance
-model = ModelWrapper(client, MODEL_NAME)
+llm_client = LLMClient(
+    provider=LLM_PROVIDER,
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
+    model=LLM_MODEL
+)
+
+model = ModelWrapper(llm_client, LLM_MODEL)
 
 
 # --- Utilities ---
 
-def get_generation_config_json(schema):
+class GenerationConfig:
+    """Configuration class for backward compatibility."""
+    def __init__(self, response_mime_type: Optional[str] = None, 
+                 response_schema: Optional[Dict] = None, 
+                 temperature: float = 0.7):
+        self.response_mime_type = response_mime_type
+        self.response_schema = response_schema
+        self.temperature = temperature
+
+
+def get_generation_config_json(schema: Dict) -> GenerationConfig:
     """
-    Returns a config object compatible with the new SDK.
-    The new SDK expects a 'types.GenerateContentConfig' or just a dict in the 'config' arg.
+    Returns a config object for JSON response generation.
     """
-    return types.GenerateContentConfig(
+    return GenerationConfig(
         response_mime_type="application/json",
         response_schema=schema,
         temperature=0.7

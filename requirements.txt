@@ -9,9 +9,10 @@ numpy
 fastapi
 pydantic
 uvicorn
-google-genai
-google-cloud-aiplatform
-google-api-core
+openai  # Universal LLM client for OpenAI-compatible APIs
+google-genai  # Optional: Keep if you want to use native Gemini SDK features
+google-cloud-aiplatform  # Optional
+google-api-core  # Optional
 PyPDF2
 Markdown
 python-dotenv
@@ -25,3 +26,4 @@ psycopg2-binary
 # Notes:
 # - Local modules (e.g., `gemini`, `pdfutil`) are not included here.
 # - Some packages (sentence-transformers, transformers, PyMuPDF) may need specific versions depending on your environment (GPU vs CPU).
+# - google-* packages are optional and only needed if using native Gemini SDK features
